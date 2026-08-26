@@ -1,76 +1,103 @@
 import {
-    collection,
-    doc,
-    getDoc,
-    getDocs,
-    query,
-    serverTimestamp,
-    setDoc,
-    where,
+  arrayRemove,
+  arrayUnion,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  setDoc,
+  updateDoc,
+  where,
 } from "firebase/firestore";
-
 import { db } from "../firebase/firestore";
 
+export interface EmergencyContact {
+  uid: string;
+  email: string;
+  name?: string;
+}
+
 export async function createUserProfile(
-  uid: string,
-  name: string,
-  email: string,
-  phone: string,
+  userUid: string,
+  data: { name: string; email: string },
 ) {
-  await setDoc(doc(db, "users", uid), {
-    uid,
+  const userRef = doc(db, "users", userUid);
+  await setDoc(
+    userRef,
+    {
+      uid: userUid,
+      name: data.name,
+      email: data.email.toLowerCase(),
+      emergencyContacts: [],
+      emergencyMessage: "Preciso de ajuda urgente!",
+      createdAt: new Date(),
+    },
+    { merge: true },
+  );
+}
+
+export async function getUserProfile(userUid: string) {
+  const userRef = doc(db, "users", userUid);
+  const userSnapshot = await getDoc(userRef);
+
+  if (userSnapshot.exists()) {
+    return userSnapshot.data();
+  }
+
+  return null;
+}
+
+export async function findUserByEmail(email: string) {
+  const usersRef = collection(db, "users");
+  const q = query(usersRef, where("email", "==", email.trim().toLowerCase()));
+  const querySnapshot = await getDocs(q);
+
+  if (!querySnapshot.empty) {
+    const docSnap = querySnapshot.docs[0];
+    return {
+      id: docSnap.id,
+      ...docSnap.data(),
+    };
+  }
+
+  return null;
+}
+
+export async function updateProfileInfo(
+  userUid: string,
+  name: string,
+  emergencyMessage: string,
+) {
+  const userRef = doc(db, "users", userUid);
+  await updateDoc(userRef, {
     name,
-    email,
-    phone,
-    emergencyContact: "",
-    emergencyMessage: "Preciso de ajuda. Estou em uma situação de perigo.",
-    createdAt: serverTimestamp(),
+    emergencyMessage,
   });
 }
 
-export async function getUserProfile(uid: string) {
-  const userRef = doc(db, "users", uid);
-  const snapshot = await getDoc(userRef);
-
-  if (!snapshot.exists()) {
-    return null;
-  }
-
-  return snapshot.data();
-}
-export async function findUserByPhone(phone: string) {
-  const usersRef = collection(db, "users");
-
-  const q = query(usersRef, where("phone", "==", phone));
-
-  const snapshot = await getDocs(q);
-
-  if (snapshot.empty) {
-    return null;
-  }
-
-  const document = snapshot.docs[0];
-
-  return {
-    id: document.id,
-    ...document.data(),
-  };
-}
-export async function updateEmergencySettings(
-  uid: string,
-  name: string,
-  emergencyContact: string,
-  emergencyMessage: string,
+export async function addEmergencyContact(
+  userUid: string,
+  contactUid: string,
+  contactEmail: string,
+  contactName?: string,
 ) {
-  await setDoc(
-    doc(db, "users", uid),
-    {
-      name,
-      emergencyContact,
-      emergencyMessage,
-    },
-    {
-      merge: true,
-    },
-  );
+  const userRef = doc(db, "users", userUid);
+  await updateDoc(userRef, {
+    emergencyContacts: arrayUnion({
+      uid: contactUid,
+      email: contactEmail.toLowerCase(),
+      name: contactName || contactEmail.split("@")[0],
+    }),
+  });
+}
+
+export async function removeEmergencyContact(
+  userUid: string,
+  contact: EmergencyContact,
+) {
+  const userRef = doc(db, "users", userUid);
+  await updateDoc(userRef, {
+    emergencyContacts: arrayRemove(contact),
+  });
 }

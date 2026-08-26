@@ -1,23 +1,29 @@
 import { useEffect, useRef, useState } from "react";
-
 import {
-    Alert,
-    Linking,
-    Pressable,
-    SafeAreaView,
-    StyleSheet,
-    Text,
-    View,
+  Alert,
+  Linking,
+  Pressable,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
 
 import * as Location from "expo-location";
 import { router } from "expo-router";
+import { getAuth } from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
+
+import { sendEmergencyAlertToAllContacts } from "../../services/chat/chatService";
+import { db } from "../../services/firebase/firestore";
 
 export default function EmergencyScreen() {
   const [countdown, setCountdown] = useState(5);
   const [gettingLocation, setGettingLocation] = useState(false);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const auth = getAuth();
+  const user = auth.currentUser;
 
   useEffect(() => {
     timerRef.current = setInterval(() => {
@@ -55,70 +61,84 @@ export default function EmergencyScreen() {
     try {
       setGettingLocation(true);
 
-      // Solicita permissão para acessar a localização
-      const { status } = await Location.requestForegroundPermissionsAsync();
-
-      if (status !== Location.PermissionStatus.GRANTED) {
+      if (!user) {
+        Alert.alert("Erro", "Usuário não autenticado.");
         setGettingLocation(false);
-
-        Alert.alert(
-          "Localização não disponível",
-          "O SafeHer precisa da permissão de localização para gerar o alerta.",
-          [
-            {
-              text: "Voltar",
-              onPress: () => router.replace("/(app)/home"),
-            },
-          ],
-        );
-
         return;
       }
 
-      // Obtém a localização atual
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
-      });
+      // 1. Busca os dados do usuário atual no Firestore
+      const userRef = doc(db, "users", user.uid);
+      const userSnap = await getDoc(userRef);
+      const userData = userSnap.data();
 
-      const latitude = location.coords.latitude;
-      const longitude = location.coords.longitude;
+      // Pega a lista de contatos do array 'emergencyContacts' ou tenta o campo antigo por segurança
+      const emergencyContacts = userData?.emergencyContacts || [];
+      const singleContactUid = userData?.emergencyContactUid;
+      const customAlertMessage =
+        userData?.emergencyMessage || "Preciso de ajuda urgente!";
 
-      // Cria o link do Google Maps
-      const mapsLink =
-        `https://www.google.com/maps/search/?api=1&query=` +
-        `${latitude},${longitude}`;
+      // 2. Tenta obter a localização com segurança
+      let mapsLink = "Localização não informada.";
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === Location.PermissionStatus.GRANTED) {
+          const location = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.High,
+          });
+          mapsLink = `https://www.google.com/maps/search/?api=1&query=${location.coords.latitude},${location.coords.longitude}`;
+        }
+      } catch (locErr) {
+        console.log("Erro ao capturar GPS, enviando sem localização:", locErr);
+      }
+
+      // 3. Mapeia os UIDs dos contatos para envio
+      let target: any = null;
+      if (emergencyContacts.length > 0) {
+        target = emergencyContacts.map((c: any) => c.uid);
+      } else if (singleContactUid) {
+        target = singleContactUid;
+      }
+
+      // 4. Dispara o alerta para todos os contatos configurados
+      await sendEmergencyAlertToAllContacts(
+        user.uid,
+        target,
+        customAlertMessage,
+        mapsLink,
+      );
 
       setGettingLocation(false);
 
       Alert.alert(
-        "🚨 Alerta preparado",
-        `Localização encontrada!\n\n` +
-          `Latitude: ${latitude.toFixed(6)}\n` +
-          `Longitude: ${longitude.toFixed(6)}\n\n` +
-          `O link do mapa também foi gerado.`,
+        "🚨 Alerta Enviado",
+        "Sua localização e pedido de socorro foram enviados com sucesso para seus contatos de emergência.",
         [
           {
             text: "Abrir mapa",
             onPress: () => {
-              Linking.openURL(mapsLink);
+              if (mapsLink.startsWith("http")) {
+                Linking.openURL(mapsLink);
+              }
             },
           },
           {
-            text: "Voltar",
+            text: "Voltar para Início",
             onPress: () => {
               router.replace("/(app)/home");
             },
           },
         ],
       );
-    } catch (error) {
-      console.log("Erro ao obter localização:", error);
+    } catch (error: any) {
+      console.log("ERRO REAL AO PROCESSAR EMERGÊNCIA:", error);
 
       setGettingLocation(false);
 
       Alert.alert(
         "Erro",
-        "Não foi possível obter sua localização. Tente novamente.",
+        error?.message ||
+          "Não foi possível processar o alerta de emergência. Tente novamente.",
         [
           {
             text: "Voltar",
@@ -133,7 +153,7 @@ export default function EmergencyScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
         <View style={styles.top}>
-          <Text style={styles.logo}>🛡️</Text>
+          <Text style={styles.logo}>📍</Text>
 
           <Text style={styles.title}>Modo segurança</Text>
 
@@ -150,10 +170,10 @@ export default function EmergencyScreen() {
                 <Text style={styles.locationEmoji}>📍</Text>
               </View>
 
-              <Text style={styles.locationTitle}>Obtendo localização...</Text>
+              <Text style={styles.locationTitle}>Enviando alerta...</Text>
 
               <Text style={styles.waitingText}>
-                Aguarde enquanto o SafeHer identifica sua localização.
+                Obtendo localização e notificando seus contatos de emergência.
               </Text>
             </>
           ) : (
@@ -165,7 +185,7 @@ export default function EmergencyScreen() {
               </View>
 
               <Text style={styles.waitingText}>
-                O alerta será preparado quando a contagem terminar.
+                O alerta será disparado quando a contagem terminar.
               </Text>
             </>
           )}

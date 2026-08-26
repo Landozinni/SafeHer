@@ -1,33 +1,94 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
-    Alert,
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  Alert,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
 } from "react-native";
 
 import { router } from "expo-router";
+import { collection, doc, getDoc, onSnapshot, query } from "firebase/firestore";
+
 import { useAuth } from "../../context/AuthContext";
+import { getOrCreateConversation } from "../../services/chat/chatService";
+import { db } from "../../services/firebase/firestore";
+import {
+  isSecurityModeActive,
+  setSecurityModeActive,
+} from "../../services/securityService";
 
 export default function HomeScreen() {
   const { user } = useAuth();
-  const [securityMode, setSecurityMode] = useState(false);
+  const [nfcModeActive, setNfcModeActive] = useState(false);
+  const [hasMessages, setHasMessages] = useState(false);
 
-  function handleSecurityMode() {
-    if (securityMode) {
-      Alert.alert("Modo segurança", "O modo segurança foi desativado.", [
-        {
-          text: "OK",
-          onPress: () => setSecurityMode(false),
-        },
-      ]);
+  useEffect(() => {
+    loadNfcState();
+  }, []);
 
-      return;
+  async function loadNfcState() {
+    const active = await isSecurityModeActive();
+    setNfcModeActive(active);
+  }
+
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+
+    async function checkChatActivity() {
+      if (!user) return;
+
+      try {
+        const userRef = doc(db, "users", user.uid);
+        const userSnap = await getDoc(userRef);
+        const userData = userSnap.data();
+
+        if (userData?.emergencyContactUid) {
+          const conversationId = await getOrCreateConversation(
+            user.uid,
+            userData.emergencyContactUid,
+          );
+
+          const messagesRef = collection(
+            db,
+            "conversations",
+            conversationId,
+            "messages",
+          );
+          const q = query(messagesRef);
+
+          unsubscribe = onSnapshot(q, (snapshot) => {
+            setHasMessages(!snapshot.empty);
+          });
+        }
+      } catch (error) {
+        console.error("Erro ao verificar mensagens do chat:", error);
+      }
     }
 
+    checkChatActivity();
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [user]);
+
+  async function toggleNfcSecurity(value: boolean) {
+    setNfcModeActive(value);
+    await setSecurityModeActive(value);
+
+    if (value) {
+      Alert.alert(
+        "🛡️ Proteção NFC Ativada",
+        "Ao aproximar sua Tag NFC, o app abrirá direto na contagem de emergência.",
+      );
+    }
+  }
+
+  function handleManualEmergency() {
     router.push("/(app)/emergency");
   }
 
@@ -41,7 +102,6 @@ export default function HomeScreen() {
         <View style={styles.header}>
           <View>
             <Text style={styles.welcome}>Olá 👋</Text>
-
             <Text style={styles.title}>Está tudo bem?</Text>
           </View>
 
@@ -55,58 +115,64 @@ export default function HomeScreen() {
           </Pressable>
         </View>
 
-        {/* STATUS */}
+        {/* STATUS SEGUNDO PLANO (NFC) */}
         <View
-          style={[styles.statusCard, securityMode && styles.statusCardActive]}
+          style={[styles.statusCard, nfcModeActive && styles.statusCardActive]}
         >
           <View
-            style={[styles.statusIcon, securityMode && styles.statusIconActive]}
+            style={[
+              styles.statusIcon,
+              nfcModeActive && styles.statusIconActive,
+            ]}
           >
-            <Text style={styles.statusEmoji}>{securityMode ? "🛡️" : "✓"}</Text>
+            <Text style={styles.statusEmoji}>
+              {nfcModeActive ? "🛡️" : "📡"}
+            </Text>
           </View>
 
           <View style={styles.statusInfo}>
             <Text style={styles.statusTitle}>
-              {securityMode ? "Modo segurança ativo" : "Você está protegida"}
+              {nfcModeActive ? "Proteção NFC Ativa" : "Proteção NFC Desativada"}
             </Text>
 
             <Text style={styles.statusDescription}>
-              {securityMode
-                ? "O SafeHer está acompanhando sua situação."
-                : "Ative o modo segurança quando precisar."}
+              {nfcModeActive
+                ? "Pronto para acionamento por aproximacão de Tag."
+                : "Ative a chave ao lado para permitir gatilho por NFC."}
             </Text>
           </View>
+
+          <Switch
+            value={nfcModeActive}
+            onValueChange={toggleNfcSecurity}
+            trackColor={{ false: "#D1C4E9", true: "#7048B8" }}
+            thumbColor={nfcModeActive ? "#FFFFFF" : "#F4F3F4"}
+          />
         </View>
 
         {/* BOTÃO PRINCIPAL */}
         <View style={styles.securitySection}>
-          <Text style={styles.sectionTitle}>Modo segurança</Text>
+          <Text style={styles.sectionTitle}>Emergência Direta</Text>
 
           <Text style={styles.sectionDescription}>
-            Use quando estiver em uma situação de perigo ou quando quiser
-            compartilhar sua localização com seu contato de emergência.
+            Toque abaixo para iniciar o temporizador de segurança imediatamente.
           </Text>
 
           <Pressable
-            onPress={handleSecurityMode}
+            onPress={handleManualEmergency}
             style={({ pressed }) => [
               styles.securityButton,
-              securityMode && styles.securityButtonActive,
               pressed && styles.securityButtonPressed,
             ]}
           >
             <View style={styles.securityButtonCircle}>
-              <Text style={styles.securityEmoji}>
-                {securityMode ? "✓" : "🆘"}
-              </Text>
+              <Text style={styles.securityEmoji}>🆘</Text>
             </View>
 
-            <Text style={styles.securityButtonTitle}>
-              {securityMode ? "SEGURANÇA ATIVA" : "ATIVAR SEGURANÇA"}
-            </Text>
+            <Text style={styles.securityButtonTitle}>ACIONAR AGORA</Text>
 
             <Text style={styles.securityButtonSubtitle}>
-              {securityMode ? "Toque para desativar" : "Toque para iniciar"}
+              Toque para iniciar temporizador
             </Text>
           </Pressable>
         </View>
@@ -142,6 +208,7 @@ export default function HomeScreen() {
           >
             <View style={styles.quickIcon}>
               <Text style={styles.quickEmoji}>💬</Text>
+              {hasMessages && <View style={styles.badgeDot} />}
             </View>
 
             <Text style={styles.quickCardTitle}>Contato</Text>
@@ -154,12 +221,12 @@ export default function HomeScreen() {
 
         {/* INFORMAÇÃO */}
         <View style={styles.infoCard}>
-          <Text style={styles.infoTitle}>🛡️ Como o SafeHer ajuda?</Text>
+          <Text style={styles.infoTitle}>🛡️ Como funciona a Tag NFC?</Text>
 
           <Text style={styles.infoText}>
-            Quando o modo segurança for ativado, você terá alguns segundos para
-            cancelar. Caso contrário, o aplicativo poderá enviar sua mensagem de
-            emergência e sua localização para o contato cadastrado.
+            Com a chave de proteção ativa, encostar o smartphone na Tag NFC abre
+            o aplicativo direto no temporizador. Se não houver cancelamento, sua
+            localização e alerta serão enviados.
           </Text>
         </View>
       </ScrollView>
@@ -227,9 +294,9 @@ const styles = StyleSheet.create({
   },
 
   statusIcon: {
-    width: 50,
-    height: 50,
-    borderRadius: 16,
+    width: 44,
+    height: 44,
+    borderRadius: 14,
     backgroundColor: "#E8F6EC",
     justifyContent: "center",
     alignItems: "center",
@@ -240,25 +307,25 @@ const styles = StyleSheet.create({
   },
 
   statusEmoji: {
-    fontSize: 24,
+    fontSize: 22,
   },
 
   statusInfo: {
     flex: 1,
-    marginLeft: 14,
+    marginHorizontal: 12,
   },
 
   statusTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "700",
     color: "#211A2D",
   },
 
   statusDescription: {
-    fontSize: 13,
+    fontSize: 12,
     color: "#77717F",
-    lineHeight: 19,
-    marginTop: 3,
+    lineHeight: 16,
+    marginTop: 2,
   },
 
   securitySection: {
@@ -298,10 +365,6 @@ const styles = StyleSheet.create({
     },
 
     elevation: 8,
-  },
-
-  securityButtonActive: {
-    backgroundColor: "#573494",
   },
 
   securityButtonPressed: {
@@ -369,10 +432,23 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 12,
+    position: "relative",
   },
 
   quickEmoji: {
     fontSize: 21,
+  },
+
+  badgeDot: {
+    position: "absolute",
+    top: 2,
+    right: 2,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#7048B8",
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
   },
 
   quickCardTitle: {

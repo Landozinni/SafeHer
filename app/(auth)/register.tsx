@@ -1,15 +1,15 @@
 import { useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 
 import { router } from "expo-router";
@@ -19,7 +19,6 @@ import { createUserProfile } from "../../services/user/userService";
 
 export default function RegisterScreen() {
   const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -27,13 +26,7 @@ export default function RegisterScreen() {
   const [loading, setLoading] = useState(false);
 
   async function handleRegister() {
-    if (
-      !name.trim() ||
-      !email.trim() ||
-      !phone.trim() ||
-      !password ||
-      !confirmPassword
-    ) {
+    if (!name.trim() || !email.trim() || !password || !confirmPassword) {
       Alert.alert("Campos obrigatórios", "Preencha todos os campos.");
       return;
     }
@@ -56,13 +49,13 @@ export default function RegisterScreen() {
 
       const credential = await register(email.trim().toLowerCase(), password);
 
-      await createUserProfile(
-        credential.user.uid,
-        name.trim(),
-        email.trim().toLowerCase(),
-        phone.trim(),
-      );
-      console.log("Perfil criado no Firestore!");
+      // CORREÇÃO AQUI: Passando os dados no formato de objeto esperado pela userService
+      await createUserProfile(credential.user.uid, {
+        name: name.trim(),
+        email: email.trim().toLowerCase(),
+      });
+
+      console.log("Perfil criado no Firestore com sucesso!");
       Alert.alert("Conta criada! 🛡️", "Sua conta foi criada com sucesso.", [
         {
           text: "Continuar",
@@ -70,7 +63,7 @@ export default function RegisterScreen() {
         },
       ]);
     } catch (error: any) {
-      console.log(error);
+      console.error("Erro detalhado no cadastro:", error);
 
       let message = "Não foi possível criar sua conta.";
 
@@ -89,6 +82,12 @@ export default function RegisterScreen() {
 
         case "auth/network-request-failed":
           message = "Verifique sua conexão com a internet.";
+          break;
+
+        default:
+          if (error?.message) {
+            message = error.message;
+          }
           break;
       }
 
@@ -142,16 +141,7 @@ export default function RegisterScreen() {
             autoCapitalize="none"
             autoCorrect={false}
           />
-          <Text style={styles.label}>Telefone</Text>
 
-          <TextInput
-            style={styles.input}
-            placeholder="(49) 99999-9999"
-            placeholderTextColor="#999"
-            value={phone}
-            onChangeText={setPhone}
-            keyboardType="phone-pad"
-          />
           <Text style={styles.label}>Senha</Text>
 
           <TextInput

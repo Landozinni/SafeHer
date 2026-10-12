@@ -54,7 +54,11 @@ export default function EmergencyScreen() {
       clearInterval(timerRef.current);
     }
 
-    router.back();
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace("/(app)/home");
+    }
   }
 
   async function triggerEmergency() {
@@ -62,7 +66,12 @@ export default function EmergencyScreen() {
       setGettingLocation(true);
 
       if (!user) {
-        Alert.alert("Erro", "Usuário não autenticado.");
+        Alert.alert("Erro", "Usuário não autenticado.", [
+          {
+            text: "OK",
+            onPress: () => router.replace("/(app)/home"),
+          },
+        ]);
         setGettingLocation(false);
         return;
       }
@@ -120,6 +129,7 @@ export default function EmergencyScreen() {
               if (mapsLink.startsWith("http")) {
                 Linking.openURL(mapsLink);
               }
+              router.replace("/(app)/home");
             },
           },
           {
@@ -129,6 +139,9 @@ export default function EmergencyScreen() {
             },
           },
         ],
+        {
+          cancelable: false,
+        },
       );
     } catch (error: any) {
       console.log("ERRO REAL AO PROCESSAR EMERGÊNCIA:", error);
@@ -145,6 +158,7 @@ export default function EmergencyScreen() {
             onPress: () => router.replace("/(app)/home"),
           },
         ],
+        { cancelable: false },
       );
     }
   }
